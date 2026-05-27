@@ -12,7 +12,7 @@
 
 class Command {
     // TODO: Add your data members
-protected: char *cmd_line;
+
 public:
     Command(const char *cmd_line) {
         if(!cmd_line){
@@ -23,8 +23,13 @@ public:
         strcpy(this->cmd_line,cmd_line);
 
     };
-    char  *args[COMMAND_MAX_ARGS];
+    // the args array its final elem should always be nullptr
+    char  *args[COMMAND_MAX_ARGS + 1] = {};
     int argsNum;
+    bool needFork = false;
+    bool isBackGround = false;
+    char *cmd_line;
+    bool isFinished = false;
 
     virtual ~Command(){
         delete[] cmd_line;
@@ -56,7 +61,7 @@ public:
 
 class ExternalCommand : public Command {
 public:
-    ExternalCommand(const char *cmd_line);
+    ExternalCommand(const char *cmd_line,bool isBackGround);
 
     virtual ~ExternalCommand() {
     }
@@ -152,7 +157,9 @@ class JobsList;
 
 class QuitCommand : public BuiltInCommand {
     // TODO: Add your data members public:
-    QuitCommand(const char *cmd_line, JobsList *jobs);
+    //     QuitCommand(const char *cmd_line, JobsList *jobs);
+public:
+    QuitCommand(const char *cmd_line);
 
     virtual ~QuitCommand() {
     }
@@ -164,15 +171,27 @@ class JobsList {
 public:
     class JobEntry {
         // TODO: Add your data members
-    };
+    public:
+        Command *cmd;
+        int jobId;
+        pid_t jobPid;
 
+        JobEntry(Command *cmd,int jobId,pid_t jobPid,bool isFinished = false):cmd(cmd),jobId(jobId),
+        jobPid(jobPid){}
+
+        ~JobEntry() = default;
+
+    };
+    std::vector<JobEntry> jobList ;
+    int GJobId;
+    bool isStopped;
     // TODO: Add your data members
 public:
-    JobsList();
+    JobsList():GJobId(0),isStopped(false){};
 
-    ~JobsList();
+    ~JobsList() = default;
 
-    void addJob(Command *cmd, bool isStopped = false);
+    void addJob(Command *cmd,pid_t jobPid, bool isStopped = false);
 
     void printJobsList();
 
@@ -194,7 +213,9 @@ public:
 class JobsCommand : public BuiltInCommand {
     // TODO: Add your data members
 public:
-    JobsCommand(const char *cmd_line, JobsList *jobs);
+    //JobsCommand(const char *cmd_line, JobsList *jobs);
+    JobsCommand(const char *cmd_line);
+
 
     virtual ~JobsCommand() {
     }
@@ -277,6 +298,7 @@ public:
     Command *CreateCommand(const char *cmd_line);
     std::map <std::string ,std::string> aliasMap;
     std::vector<std::string> aliasCmdOrder;
+    JobsList ShellJobList = JobsList();
 
     SmallShell(SmallShell const &) = delete; // disable copy ctor
     void operator=(SmallShell const &) = delete; // disable = operator

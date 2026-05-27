@@ -7,6 +7,8 @@
 #include <iomanip>
 #include "Commands.h"
 #include <regex>
+#include <fcntl.h>
+#include <algorithm>
 
 using namespace std;
 
@@ -153,9 +155,186 @@ void AliasCommand::execute() {
         tempAliasMap[shortCut] = alaisCmd;
         tempAliasVec.push_back(shortCut);
 
+}
+UnSetEnvCommand::UnSetEnvCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
+
+extern char **__environ;
+void UnSetEnvCommand::execute() {
+    if(argsNum == 0){
+        cerr<<"smash error: unsetenv: not enough arguments"<<endl;
+    }
+    pid_t my_pid = getpid();
+    std::string path = "/proc/"+ std::to_string(my_pid) +"/environ";
+    int openSuc = open(path.c_str(),O_RDONLY);
+    if(openSuc == -1){
+        perror("smash error: open failed");
+        return;
+    }
+    char buff[100];
+    int readSuc = read(openSuc,buff,100);
+    std::vector<string> fileVar;
+    std::string word="";
+    while(readSuc > 0){
+        for (int k = 0; k < readSuc; ++k) {
+            if(buff[k] != '\0'){
+                word += buff[k];
+            }else{
+                fileVar.push_back(word);
+                word = "";
+            }
+        }
+        readSuc = read(openSuc,buff,100);
+    }
+    if(close(openSuc) == -1){
+        perror("smash error: close failed");
+    }
+    int j = 1;
+    while(j < argsNum){
+        bool exist = false;
+        std::string varPrefix;
+        for (const auto& var :fileVar) {
+            varPrefix = string(args[j]) + "=";
+            if(var.rfind(varPrefix,0) == 0){
+                exist = true;
+                break;
+            }
+        }
+        if(!exist){
+            cerr <<"smash error: unsetenv: "<<args[j]<<" does not exist"<<endl;
+            return;
+        }
+        int i = 0;
+        bool located = false;
+        while(__environ[i] != nullptr){
+            if(located){
+                __environ[i] = __environ[i+1];
+                if(environ == nullptr){
+                    break;
+                }
+            }else{
+                std::string env_var = string(__environ[i]);
+                if(env_var.rfind(varPrefix,0) == 0 ){
+                    located = true;
+                    __environ[i] = __environ[i+1];
+                    if(__environ[i] == nullptr){
+                        break;
+                    }
+
+                }
+            }
+            i++;
+        }
+        j++;
+
+    }
+
+}
+
+void JobsList::removeFinishedJobs() {
+    std::vector<JobEntry> &tempJobList = SmallShell::getInstance().ShellJobList.jobList;
+    for (size_t i = 0; i < tempJobList.size(); ++i) {
+        if(tempJobList[i].cmd->isFinished){
+            tempJobList.erase(tempJobList.begin() + i);
+        }
+    }
+    this->isStopped = false;
+}
+
+void JobsList::addJob(Command *cmd,pid_t jobPid,bool isStopped) {
+    if(isStopped){
+        removeFinishedJobs();
+    }
+    jobList.push_back(JobEntry (cmd,GJobId,jobPid));
+    GJobId++;
+}
+
+void JobsList::removeJobById(int jobId) {
+    std::vector<JobEntry> &tempJobList = SmallShell::getInstance().ShellJobList.jobList;
+    auto it = std::find_if(tempJobList.begin(),tempJobList.end(),[jobId](const JobEntry& job){
+        return job.jobId == jobId;
+    });
+    if(it != tempJobList.end()){
+        tempJobList.erase(it);
+    }
+}
+
+JobsList::JobEntry *JobsList::getJobById(int jobId) {
+    std::vector<JobEntry> &tempJobList = SmallShell::getInstance().ShellJobList.jobList;
+    auto it = std::find_if(tempJobList.begin(),tempJobList.end(),[jobId](const JobEntry& job){
+        return job.jobId == jobId;
+    });
+    if(it != tempJobList.end()){
+        return &(*it);
+    }
+    return nullptr;
+
+}
+
+void JobsList::printJobsList() {
+    if(this->isStopped){
+        removeFinishedJobs();
+    }
+    std::vector<JobEntry> &tempJobList = SmallShell::getInstance().ShellJobList.jobList;
+    for(const auto& job : tempJobList){
+        cout<<"["<<job.jobId<<"] "<<job.cmd->cmd_line<<endl;
+    }
+
+}
+
+
+
+
+
+JobsCommand::JobsCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
+
+void JobsCommand::execute() {
+    JobsList &tempjobsList = SmallShell::getInstance().ShellJobList;
+    tempjobsList.printJobsList();
+
+}
+
+
+
+
+QuitCommand::QuitCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
+
+void QuitCommand::execute() {
+
+
+    if(argsNum == 1){
+        exit(0);
+    }
+    if(argsNum > 1 && args[1] == std::string ("kill")){
+        JobsList &tempJobList = SmallShell::getInstance().ShellJobList;
+        cout<<"smash: sending SIGKILL signal to "<<tempJobList.jobList.size()<<" jobs:"<<endl;
+        for (const auto& cmd : tempJobList.jobList) {
+            pid_t jobPid = cmd.jobPid;
+            cout<<jobPid<<": "<<cmd.cmd->cmd_line<<endl;
+            tempJobList.removeJobById(cmd.jobId);
+            if(kill(jobPid,9) == -1){
+                perror(" smash error: kill failed");
+            }
+
+        }
+        exit(0);
+    }
+}
+
+ExternalCommand::ExternalCommand(const char *cmd_line, bool isBackground) : Command(cmd_line){
+    this->isBackGround = isBackground;
+    this->needFork = true;
+    argsNum = _parseCommandLine(this->cmd_line,this->args);
+}
+
+void ExternalCommand::execute() {
+    if(execvp(args[0],args) == -1){
+        perror("smash error: execvp failed\"");
+    }
 
 
 }
+
+
 
 
 
@@ -179,7 +358,6 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 
     std::map<std::string,std::string> &tempAliasMap = SmallShell::getInstance().aliasMap ;
 
-    // bool BackGroundCmd = _isBackgroundComamnd(cmd_line);
 
 
     string cmd_s = _trim(string(cmd_line));
@@ -198,6 +376,7 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     }
     char *temp = new char[cmd_s.length() + 1];
     strcpy(temp,cmd_s.c_str());
+    bool BackGroundCmd = _isBackgroundComamnd(cmd_s.c_str());
     _removeBackgroundSign(temp);
 
     cmd_s = _trim(string(temp));
@@ -214,17 +393,31 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     }
 
     else if (firstWord.compare("alias") == 0) {
-            return new AliasCommand(cmd_line);
+        return new AliasCommand(cmd_line);
+    }
+
+    //  return to this line
+
+    else if(firstWord.compare("jobs") == 0){
+        return new JobsCommand(cmd_line);
+    }
+
+    else if(firstWord.compare("quit") == 0){
+        return new QuitCommand(cmd_line);
+    }
 
       //return new ShowPidCommand(cmd_line);
+
+
+    else if (firstWord.compare("unsetenv") == 0){
+        return new UnSetEnvCommand(cmd_line);
     }
-      /*
-    else if ...
-    .....
+
+
     else {
-      return new ExternalCommand(cmd_line);
+      return new ExternalCommand(cmd_line,BackGroundCmd);
     }
-    */
+
     return nullptr;
 }
 
@@ -232,8 +425,34 @@ void SmallShell::executeCommand(const char *cmd_line) {
     // TODO: Add your implementation here
     // for example:
      Command* cmd = CreateCommand(cmd_line);
-     if(cmd != nullptr){
+
+     if(cmd == nullptr){
+         return;
+     }
+     else if (!cmd->needFork){
+         ShellJobList.removeFinishedJobs();
          cmd->execute();
+         cmd->isFinished = true;
+     }else {
+         pid_t my_pid = fork();
+         if(my_pid == -1){
+             perror("smash error: fork failed\"");
+             return;
+         }
+         // still needs to handle the signal CTRL+C + adding the jobs
+         if(my_pid == 0){
+             cmd->execute();
+
+
+         }else{
+             if(!cmd->isBackGround) {
+                 wait(NULL);
+             }
+             cmd->isFinished = true;
+             ShellJobList.isStopped = true;
+             ShellJobList.removeFinishedJobs();
+             ShellJobList.addJob(cmd,my_pid,ShellJobList.isStopped);
+         }
      }
 
 

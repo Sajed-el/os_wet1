@@ -113,6 +113,49 @@ void GetCurrDirCommand::execute() {
       perror("smash error: getcwd failed");
   }
 }
+
+ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
+
+void ShowPidCommand::execute() {
+    pid_t pid = getpid();
+    cout << "smash pid is " << pid << endl;
+}
+
+ChangeDirCommand::ChangeDirCommand(const char *cmd_line, char **plastPwd)
+    : BuiltInCommand(cmd_line),prev_dir(plastPwd) {}
+
+void ChangeDirCommand::execute() {
+    if (argsNum > 2) {
+        std::cerr << "smash error: cd: too many arguments\n";
+    }
+    else if (argsNum > 1 && strcmp(args[1],"-") == 0){
+        if (*prev_dir == nullptr) {
+            std::cerr << "smash error: cd: OLDPWD not set\n";
+        }
+        else {
+            char* prev_dir_holder = getcwd(nullptr, 0);
+            int res = chdir(*prev_dir);
+            if (res == -1){
+                perror("smash error: chdir failed");
+            }
+            else{
+                *prev_dir = prev_dir_holder;
+            }
+        }
+    }
+    else if (argsNum > 1) {
+        char* prev_dir_holder = getcwd(nullptr, 0);
+        int res = chdir(args[1]);
+        if (res == -1){
+            perror("smash error: chdir failed");
+        }
+        else{
+            *prev_dir = prev_dir_holder;
+        }
+    }
+
+}
+
 AliasCommand::AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line){
     string cmd_s = _trim(string(this->cmd_line));
      legalAlias = std::regex_match(cmd_s,std::regex("^alias [a-zA-Z0-9_]+='[^']*'$"));

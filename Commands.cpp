@@ -13,7 +13,7 @@
 using namespace std;
 
 const std::string WHITESPACE = " \n\r\t\f\v";
-
+std::string original_cmd_line;
 #if 0
 #define FUNC_ENTRY()  \
   cout << __PRETTY_FUNCTION__ << " --> " << endl;
@@ -231,21 +231,38 @@ void UnSetEnvCommand::execute() {
 }
 
 void JobsList::removeFinishedJobs() {
-    std::vector<JobEntry> &tempJobList = SmallShell::getInstance().ShellJobList.jobList;
-    for (size_t i = 0; i < tempJobList.size(); ++i) {
-        if(tempJobList[i].cmd->isFinished){
-            tempJobList.erase(tempJobList.begin() + i);
+    int status;
+    auto it = jobList.begin();
+    while(it != jobList.end()){
+        pid_t pid = waitpid(it->jobPid,&status,WNOHANG);
+        if(pid > 0){
+            jobList.erase(it);
+        }else {
+            it++;
         }
     }
-    this->isStopped = false;
-}
+
+    }
+
+
 
 void JobsList::addJob(Command *cmd,pid_t jobPid,bool isStopped) {
-    if(isStopped){
-        removeFinishedJobs();
+   //handle signal ctrl+c
+    int status;
+    size_t pid_BG = waitpid(jobPid,&status,WNOHANG);
+    //in case child process that finished before adding it to  the joblist(happends when the child runs first)
+    if(pid_BG > 0){
+        delete cmd;
+        return;
     }
-    jobList.push_back(JobEntry (cmd,GJobId,jobPid));
-    GJobId++;
+    int max = 1;
+    for(const auto& job : jobList){
+        if(max <= job.jobId){
+            max = job.jobId + 1;
+        }
+    }
+    jobList.push_back(JobEntry (cmd,max,jobPid));
+
 }
 
 void JobsList::removeJobById(int jobId) {
@@ -271,15 +288,22 @@ JobsList::JobEntry *JobsList::getJobById(int jobId) {
 }
 
 void JobsList::printJobsList() {
-    if(this->isStopped){
-        removeFinishedJobs();
-    }
-    std::vector<JobEntry> &tempJobList = SmallShell::getInstance().ShellJobList.jobList;
-    for(const auto& job : tempJobList){
-        cout<<"["<<job.jobId<<"] "<<job.cmd->cmd_line<<endl;
+    int status;
+    auto it = jobList.begin();
+    while(it != jobList.end()){
+        pid_t pid = waitpid(it->jobPid,&status,WNOHANG);
+        if(pid > 0){
+            jobList.erase(it);
+        }else {
+            cout << "[" << it->jobId << "] " << it->cmd->origianl_cmd << endl;
+            it++;
+        }
     }
 
+
 }
+
+
 
 
 
@@ -289,6 +313,7 @@ JobsCommand::JobsCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
 
 void JobsCommand::execute() {
     JobsList &tempjobsList = SmallShell::getInstance().ShellJobList;
+    tempjobsList.removeFinishedJobs();
     tempjobsList.printJobsList();
 
 }
@@ -329,6 +354,7 @@ ExternalCommand::ExternalCommand(const char *cmd_line, bool isBackground) : Comm
 void ExternalCommand::execute() {
     if(execvp(args[0],args) == -1){
         perror("smash error: execvp failed\"");
+        exit(1);
     }
 
 
@@ -357,8 +383,10 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     // For example:
 
     std::map<std::string,std::string> &tempAliasMap = SmallShell::getInstance().aliasMap ;
-
-
+    if(cmd_line == nullptr){
+        return nullptr;
+    }
+    original_cmd_line = cmd_line;
 
     string cmd_s = _trim(string(cmd_line));
 
@@ -389,6 +417,7 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
         return new changePrompt(cmd_line);
     }
     if (firstWord.compare("pwd") == 0) {
+        cout<<"i am ";
       return new GetCurrDirCommand(cmd_line);
     }
 
@@ -418,40 +447,39 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
       return new ExternalCommand(cmd_line,BackGroundCmd);
     }
 
-    return nullptr;
 }
 
 void SmallShell::executeCommand(const char *cmd_line) {
     // TODO: Add your implementation here
     // for example:
-     Command* cmd = CreateCommand(cmd_line);
+    Command* cmd = CreateCommand(cmd_line);
 
-     if(cmd == nullptr){
+    if(cmd == nullptr){
          return;
      }
      else if (!cmd->needFork){
-         ShellJobList.removeFinishedJobs();
          cmd->execute();
-         cmd->isFinished = true;
+         delete cmd;
+         return;
      }else {
          pid_t my_pid = fork();
          if(my_pid == -1){
              perror("smash error: fork failed\"");
+             delete cmd;
              return;
          }
          // still needs to handle the signal CTRL+C + adding the jobs
          if(my_pid == 0){
+             setpgrp();
              cmd->execute();
-
-
          }else{
+             ShellJobList.removeFinishedJobs();
              if(!cmd->isBackGround) {
                  wait(NULL);
+                 delete cmd;
+             }else {
+                 ShellJobList.addJob(cmd, my_pid);
              }
-             cmd->isFinished = true;
-             ShellJobList.isStopped = true;
-             ShellJobList.removeFinishedJobs();
-             ShellJobList.addJob(cmd,my_pid,ShellJobList.isStopped);
          }
      }
 

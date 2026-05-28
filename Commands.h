@@ -10,6 +10,8 @@
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
 
+extern std::string original_cmd_line;
+
 class Command {
     // TODO: Add your data members
 
@@ -24,12 +26,13 @@ public:
 
     };
     // the args array its final elem should always be nullptr
+
     char  *args[COMMAND_MAX_ARGS + 1] = {};
     int argsNum;
     bool needFork = false;
     bool isBackGround = false;
     char *cmd_line;
-    bool isFinished = false;
+    std::string origianl_cmd = original_cmd_line;
 
     virtual ~Command(){
         delete[] cmd_line;
@@ -61,6 +64,7 @@ public:
 
 class ExternalCommand : public Command {
 public:
+    char *original_cmd_line;
     ExternalCommand(const char *cmd_line,bool isBackGround);
 
     virtual ~ExternalCommand() {
@@ -176,18 +180,16 @@ public:
         int jobId;
         pid_t jobPid;
 
-        JobEntry(Command *cmd,int jobId,pid_t jobPid,bool isFinished = false):cmd(cmd),jobId(jobId),
+        JobEntry(Command *cmd,int jobId,pid_t jobPid):cmd(cmd),jobId(jobId),
         jobPid(jobPid){}
 
         ~JobEntry() = default;
 
     };
     std::vector<JobEntry> jobList ;
-    int GJobId;
-    bool isStopped;
     // TODO: Add your data members
 public:
-    JobsList():GJobId(0),isStopped(false){};
+    JobsList() = default;
 
     ~JobsList() = default;
 
@@ -200,6 +202,7 @@ public:
     void removeFinishedJobs();
 
     JobEntry *getJobById(int jobId);
+
 
     void removeJobById(int jobId);
 

@@ -235,7 +235,7 @@ void KillCommand::execute() {
             return;
         }
         if (!(jobs->getJobById(jobId))){
-            std::cerr << "smash error: kill: job-id " << jobId << " does not exist" << endl;
+            cerr << "smash error: kill: job-id " << jobId << " does not exist" << endl;
             return;
         }
         else {
@@ -245,7 +245,7 @@ void KillCommand::execute() {
                 perror("smash error: kill failed");
             }
             else {
-                std::cout << "signal number " << killSignal << " was sent to pid " << int(jobPid) << endl;
+                cout << "signal number " << killSignal << " was sent to pid " << int(jobPid) << endl;
             }
         }
     }

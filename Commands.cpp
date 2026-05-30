@@ -176,7 +176,7 @@ void ForegroundCommand::execute() {
         else {
             JobsList::JobEntry *jobToBring = jobs->getLastJob(&jobId);
             pid_t jobPid = jobToBring->getPid();
-            std::cout << jobToBring->getCmdLine() << " " << int(jobPid) << endl;
+            cout << jobToBring->getCmdLine() << " " << int(jobPid) << endl;
             jobs->removeJobById(jobId);
             if (waitpid(jobPid,nullptr, 0) == -1){
                 perror("smash error: waitpid failed");
@@ -199,7 +199,7 @@ void ForegroundCommand::execute() {
         else {
             JobsList::JobEntry *jobToBring = jobs->getJobById(jobId);
             pid_t jobPid = jobToBring->getPid();
-            std::cout << jobToBring->getCmdLine() << " " << int(jobPid) << endl;
+            cout << jobToBring->getCmdLine() << " " << int(jobPid) << endl;
             jobs->removeJobById(jobId);
             if (waitpid(jobPid,nullptr, 0) == -1){
                 perror("smash error: waitpid failed");
@@ -301,6 +301,91 @@ void SysInfoCommand::execute() {
     cout << "Boot Time: " << bufferTime << endl;
 
 }
+
+PipeCommand::PipeCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
+
+void PipeCommand::execute() {
+	std::string cmdLine = string(cmd_line);
+	std::string cmdWrite, cmdRead;
+	bool stdErrMode = false;
+	size_t pos = cmdLine.find("|&");
+	if (pos != std::string::npos){
+		stdErrMode = true;
+		cmdWrite = cmdLine.substr(0, pos);
+		cmdRead = cmdLine.substr(pos + 2);
+	}
+	else {
+		pos = cmdLine.find("|");
+		if (pos != std::string::npos){
+			cmdWrite = cmdLine.substr(0, pos);
+			cmdRead = cmdLine.substr(pos + 1);
+		}
+	}
+	int fd[2];
+	if (pipe(fd) == -1){
+		perror("smash error: pipe failed");
+		return;
+	}
+	pid_t pidWrite = fork();
+	if (pidWrite == -1){
+		perror("smash error: fork failed");
+		return;
+	}
+	if (pidWrite == 0){
+		setpgrp();
+		if (stdErrMode){
+			dup2(fd[1], STDERR_FILENO);
+		}
+		else {
+			dup2(fd[1], STDOUT_FILENO);
+		}
+		close(fd[0]);
+		close(fd[1]);
+		SmallShell::getInstance().executeCommand(cmdWrite.c_str());
+	}
+	pid_t pidRead = fork();
+	if (pidRead == -1){
+		perror("smash error: fork failed");
+		return;
+	}
+	if (pidRead == 0){
+		setpgrp();
+		dup2(fd[0], STDIN_FILENO);
+		close(fd[0]);
+		close(fd[1]);
+		SmallShell::getInstance().executeCommand(cmdRead.c_str());
+	}
+	close(fd[0]);
+	close(fd[1]);
+	if (waitpid(pidRead, nullptr, 0) == -1){
+		perror("smash error: waitpid failed");
+	}
+	if (waitpid(pidWrite, nullptr, 0) == -1){
+		perror("smash error: waitpid failed");
+	}
+}
+
+WhoAmICommand::WhoAmICommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
+
+void WhoAmICommand::execute() {
+	struct utsname uts;
+	if (uname(&uts) == -1){
+		perror("smash error: uname failed");
+		return;
+	}
+	uid_t uid = geteuid();
+	gid_t gid = getegid();
+	char* currDir = getcwd(NULL, 0);
+	if (currDir == NULL){
+		perror("smash error: getcwd failed");
+		return;
+	}
+	cout << uts.nodename << endl;
+	cout << uid << endl;
+	cout << gid << endl;
+	cout << currDir << endl;
+}
+
 
 AliasCommand::AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line){
     string cmd_s = _trim(string(this->cmd_line));
@@ -602,16 +687,20 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 
     delete [] temp;
 
-    if(firstWord.compare("chprompt") == 0){
-        return new changePrompt(cmd_line);
-    }
-    if (firstWord.compare("pwd") == 0) {
-        cout<<"i am ";
-      return new GetCurrDirCommand(cmd_line);
+
+    if (firstWord.compare("alias") == 0) {
+        return new AliasCommand(cmd_line);
     }
 
-    else if (firstWord.compare("alias") == 0) {
-        return new AliasCommand(cmd_line);
+    else if (cmd_s.find("|") != std::string::npos) {
+        return new PipeCommand(cmd_line);
+    }
+
+    else if(firstWord.compare("chprompt") == 0){
+        return new changePrompt(cmd_line);
+    }
+    else if (firstWord.compare("pwd") == 0) {
+      return new GetCurrDirCommand(cmd_line);
     }
 
     else if (firstWord.compare("showpid") == 0) {
@@ -638,7 +727,9 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
         return new SysInfoCommand(cmd_line);
     }
 
-    //  return to this line
+    else if (firstWord.compare("whoami") == 0) {
+        return new WhoAmICommand(cmd_line);
+    }
 
     else if(firstWord.compare("jobs") == 0){
         return new JobsCommand(cmd_line);
@@ -662,6 +753,14 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 
 }
 
+void SmallShell::setCurrPid(pid_t pid) {
+    this->currPid = pid;
+}
+
+pid_t SmallShell::getCurrPid() {
+    return this->currPid;
+}
+
 void SmallShell::executeCommand(const char *cmd_line) {
     // TODO: Add your implementation here
     // for example:
@@ -671,7 +770,9 @@ void SmallShell::executeCommand(const char *cmd_line) {
          return;
      }
      else if (!cmd->needFork){
+         setCurrPid(getpid());
          cmd->execute();
+         setCurrPid(0);
          delete cmd;
          return;
      }else {
@@ -687,10 +788,13 @@ void SmallShell::executeCommand(const char *cmd_line) {
              cmd->execute();
          }else{
              ShellJobList.removeFinishedJobs();
+             setCurrPid(getpid());
              if(!cmd->isBackGround) {
                  wait(NULL);
                  delete cmd;
-             }else {
+             }
+             setCurrPid(0);
+             else {
                  ShellJobList.addJob(cmd, my_pid);
              }
          }

@@ -299,7 +299,7 @@ class SmallShell {
 private:
     // TODO: Add your data members
     SmallShell();
-
+    pid_t currPid = 0;
 public:
     static std::string Prompt ;
     Command *CreateCommand(const char *cmd_line);
@@ -319,6 +319,8 @@ public:
     ~SmallShell();
 
     void executeCommand(const char *cmd_line);
+    void setCurrPid(pid_t pid);
+    pid_t getCurrPid();
 
     // TODO: add extra methods as needed
 };

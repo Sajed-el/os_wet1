@@ -25,6 +25,11 @@ std::string original_cmd_line;
 #define FUNC_EXIT()
 #endif
 
+
+std::string is_IO_cmd ;
+std::string file_out ;
+
+
 std::string SmallShell::Prompt = "smash>";
 
 string _ltrim(const std::string &s) {
@@ -113,49 +118,6 @@ void GetCurrDirCommand::execute() {
       perror("smash error: getcwd failed");
   }
 }
-
-ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
-
-void ShowPidCommand::execute() {
-    pid_t pid = getpid();
-    cout << "smash pid is " << pid << endl;
-}
-
-ChangeDirCommand::ChangeDirCommand(const char *cmd_line, char **plastPwd)
-    : BuiltInCommand(cmd_line),prev_dir(plastPwd) {}
-
-void ChangeDirCommand::execute() {
-    if (argsNum > 2) {
-        std::cerr << "smash error: cd: too many arguments\n";
-    }
-    else if (argsNum > 1 && strcmp(args[1],"-") == 0){
-        if (*prev_dir == nullptr) {
-            std::cerr << "smash error: cd: OLDPWD not set\n";
-        }
-        else {
-            char* prev_dir_holder = getcwd(nullptr, 0);
-            int res = chdir(*prev_dir);
-            if (res == -1){
-                perror("smash error: chdir failed");
-            }
-            else{
-                *prev_dir = prev_dir_holder;
-            }
-        }
-    }
-    else if (argsNum > 1) {
-        char* prev_dir_holder = getcwd(nullptr, 0);
-        int res = chdir(args[1]);
-        if (res == -1){
-            perror("smash error: chdir failed");
-        }
-        else{
-            *prev_dir = prev_dir_holder;
-        }
-    }
-
-}
-
 AliasCommand::AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line){
     string cmd_s = _trim(string(this->cmd_line));
      legalAlias = std::regex_match(cmd_s,std::regex("^alias [a-zA-Z0-9_]+='[^']*'$"));
@@ -430,6 +392,27 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
         return nullptr;
     }
     original_cmd_line = cmd_line;
+    std::string IO_cmd_s = string(cmd_line);
+    // it can be implemented better, thats fine :) 
+    size_t pos = IO_cmd_s.find(">>");
+    if(pos != std::string::npos ){
+        cmd_line = (IO_cmd_s.substr(0,pos)).c_str();
+        file_out = IO_cmd_s.substr(pos + 2 );
+        file_out = _trim(file_out);
+        is_IO_cmd = ">>";
+    }else {
+        pos = IO_cmd_s.find(">");
+        if(pos != std::string::npos ){
+            cmd_line = (IO_cmd_s.substr(0,pos)).c_str();
+            file_out = IO_cmd_s.substr(pos + 1);
+            file_out = _trim(file_out);
+            is_IO_cmd = ">";
+        }else{
+            is_IO_cmd = "";
+        }
+    }
+
+
 
     string cmd_s = _trim(string(cmd_line));
 
@@ -460,7 +443,6 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
         return new changePrompt(cmd_line);
     }
     if (firstWord.compare("pwd") == 0) {
-        cout<<"i am ";
       return new GetCurrDirCommand(cmd_line);
     }
 
@@ -468,7 +450,6 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
         return new AliasCommand(cmd_line);
     }
 
-    //  return to this line
 
     else if(firstWord.compare("jobs") == 0){
         return new JobsCommand(cmd_line);
@@ -501,7 +482,42 @@ void SmallShell::executeCommand(const char *cmd_line) {
          return;
      }
      else if (!cmd->needFork){
+        int std_out_new = -1,fd;
+         if(!is_IO_cmd.empty()){
+
+             if(is_IO_cmd == ">") {
+                  fd = open(file_out.c_str(), O_WRONLY | O_CREAT|O_TRUNC, 0666);
+             }else{
+                 fd = open(file_out.c_str(), O_WRONLY|O_APPEND | O_CREAT, 0666);
+             }
+             if (fd == -1) {
+                 perror(" smash error: open failed");
+                 return;
+             }
+             std_out_new = dup(1);
+             if(std_out_new == -1){
+                 perror(" smash error: dup failed");
+                 return;
+             }
+                 if(dup2(fd,1) == -1){
+                     perror("smash error: dup2 failed");
+                     return;
+                 }
+             }
+
+
          cmd->execute();
+         if(std_out_new != -1){
+             if(dup2(std_out_new,1) == -1){
+                 perror("smash error: dup2 failed");
+                 close(std_out_new);
+                 close(fd);
+                 return;
+             }
+             // need to check if they fail
+             close(std_out_new);
+             close(fd);
+         }
          delete cmd;
          return;
      }else {

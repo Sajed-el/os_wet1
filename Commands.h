@@ -128,9 +128,7 @@ public:
 };
 
 class ChangeDirCommand : public BuiltInCommand {
-private:
-    char **prev_dir;
-public:
+    // TODO: Add your data members public:
     ChangeDirCommand(const char *cmd_line, char **plastPwd);
 
     virtual ~ChangeDirCommand() {

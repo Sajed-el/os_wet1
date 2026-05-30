@@ -611,7 +611,7 @@ void QuitCommand::execute() {
             cout<<jobPid<<": "<<cmd.cmd->cmd_line<<endl;
             tempJobList.removeJobById(cmd.jobId);
             if(kill(jobPid,9) == -1){
-                perror(" smash error: kill failed");
+                perror("smash error: kill failed");
             }
 
         }
@@ -626,11 +626,24 @@ ExternalCommand::ExternalCommand(const char *cmd_line, bool isBackground) : Comm
 }
 
 void ExternalCommand::execute() {
-    if(execvp(args[0],args) == -1){
-        perror("smash error: execvp failed\"");
-        exit(1);
+    std::string cmdLine = std::string(cmd_line);
+    bool complexCheck = false;
+    if (cmdLine.find("?") != std::string::npos || cmdLine.find("*") != std::string::npos) {
+        complexCheck = true;
     }
-
+    if (complexCheck) {
+        char *firstArg = (char*) "-c";
+        char *secondArg = (char*) cmdLine.c_str();
+        char* newArgs[] = {firstArg,secondArg,nullptr};
+        if (execv("/bin/bash",newArgs) == -1){
+            perror("smash error: execv failed");
+        }
+    }
+    else {
+        if (execvp(args[0],args) == -1){
+            perror("smash error: execvp failed");
+        }
+    }
 
 }
 

@@ -12,6 +12,8 @@
 #include <sys/utsname.h>
 #include <ctime>
 #include <sys/sysinfo.h>
+#include <limits.h>
+#include <sys/stat.h>
 
 using namespace std;
 
@@ -28,7 +30,15 @@ std::string original_cmd_line;
 #define FUNC_EXIT()
 #endif
 
+
+std::string is_IO_cmd ;
+std::string file_out ;
+
+
 std::string SmallShell::Prompt = "smash>";
+
+
+
 
 string _ltrim(const std::string &s) {
     size_t start = s.find_first_not_of(WHITESPACE);
@@ -83,9 +93,22 @@ void _removeBackgroundSign(char *cmd_line) {
 
 // TODO: Add your implementation for classes in Commands.h
 
+Command::Command(const char *cmd_line) {
+    {
+        if(!cmd_line){
+            this->cmd_line = nullptr;
+            return;
+        }
+        this->cmd_line = new char[strlen(cmd_line) + 1];
+        strcpy(this->cmd_line,cmd_line);
+        argsNum = _parseCommandLine(this->cmd_line,this->args);
+
+    }
+}
+
 BuiltInCommand::BuiltInCommand(const char *cmd_line): Command(cmd_line) {
     //_removeBackgroundSign(this->cmd_line);
-   argsNum = _parseCommandLine(this->cmd_line,this->args);
+  // argsNum = _parseCommandLine(this->cmd_line,this->args);
 }
 
 changePrompt::changePrompt(const char *cmd_line): BuiltInCommand(cmd_line) {
@@ -622,12 +645,21 @@ void QuitCommand::execute() {
 ExternalCommand::ExternalCommand(const char *cmd_line, bool isBackground) : Command(cmd_line){
     this->isBackGround = isBackground;
     this->needFork = true;
-    argsNum = _parseCommandLine(this->cmd_line,this->args);
+   // argsNum = _parseCommandLine(this->cmd_line,this->args);
 }
+
+
 
 void ExternalCommand::execute() {
     std::string cmdLine = std::string(cmd_line);
     bool complexCheck = false;
+    Command* cmd = nullptr;
+    if(std::string(args[0]) == "du"){
+        cmd = new DiskUsageCommand(this->cmd_line);
+
+    }else if(string (args[0]) == "usbinfo"){
+        cmd = new USBInfoCommand(this->cmd_line);
+    }
     if (cmdLine.find("?") != std::string::npos || cmdLine.find("*") != std::string::npos) {
         complexCheck = true;
     }
@@ -644,11 +676,154 @@ void ExternalCommand::execute() {
             perror("smash error: execvp failed");
         }
     }
+}
+DiskUsageCommand::DiskUsageCommand(const char *cmd_line) : Command(cmd_line){}
 
+struct linux_dirent64 {
+    unsigned long long d_ino;
+    long long          d_off;
+    unsigned short     d_reclen;
+    unsigned char      d_type;
+    char               d_name[];
+};
+
+int DiskUsageCommand::calcDiskUsage(const char *path) {
+    struct stat st;
+    int diskSum = 0;
+    if(lstat(path,&st) == -1){
+        perror("smash error: lstat failed");
+        return 0;
+    }
+    if(!S_ISDIR(st.st_mode)){
+        return st.st_blocks;
+    }
+    int fd = open(path,O_RDONLY | O_DIRECTORY);
+    if(fd == -1){
+        perror("smash error: open failed");
+        return 0;
+    }
+    char buffer[PATH_MAX];
+    int read = syscall(217,fd,buffer,PATH_MAX);  // 217 for getdents64
+    int bpos = 0;
+    while(bpos < read){
+        struct linux_dirent64 *sons = (struct linux_dirent64*)(buffer + bpos);
+        if(string(sons->d_name) == "." || string(sons->d_name) == ".."){
+            bpos += sons ->d_reclen;
+            continue;
+        }
+        std::string son_path = std::string(path) + "/" + sons->d_name;
+        bpos += sons ->d_reclen;
+        diskSum += calcDiskUsage(son_path.c_str());
+    }
+    close(fd);
+    return (diskSum + st.st_blocks);
 }
 
 
+void DiskUsageCommand::execute() {
+    int diskUsage ;
+    char res[PATH_MAX];
+    if(argsNum == 1){
+        if(getcwd(res,PATH_MAX) == nullptr){
+            perror("smash error: getcwd failed");
+        }
+        diskUsage = calcDiskUsage(res);
 
+    }else if(argsNum > 2){
+        cerr << "smash error: du: too many arguments"<<endl;
+        return;
+    }else {
+        diskUsage = calcDiskUsage(args[1]);
+    }
+    cout << "Total disk usage: "<< (diskUsage + 1)/2<<" KB"<<endl;
+}
+USBInfoCommand::USBInfoCommand(const char *cmd_line) : Command(cmd_line){}
+
+struct UsbDevice{
+    int devnum;
+    std::string vendor;
+    std::string product;
+    std::string manufacture;
+    std::string product_name;
+    std::string power;
+    UsbDevice(int dev, std::string vendor, std::string prod,
+              std::string manu, std::string prod_name, std::string power)
+            : devnum(dev), vendor(vendor), product(prod),
+              manufacture(manu), product_name(prod_name), power(power) {}
+
+};
+string  usbInfo(std::string path){
+    int fd = open(path.c_str(),O_RDONLY);
+    if(fd == -1){
+        return "N/A";
+    }
+    char buffer[256];
+    int readn = read(fd, buffer,256);
+    if(readn <= 0){
+        return "N/A";
+    }
+    close(fd);
+    buffer[readn] = '\0';
+    string value(buffer);
+    if(!value.empty() && (value.back() == '\n' || value.back() == '\r')){
+        value.pop_back();
+    }
+    if(value.empty()){
+        return value;
+    }
+    return value;
+}
+void USBInfoCommand::execute() {
+    const char *usbPath = "/sys/bus/usb/devices/";
+    std::vector<struct UsbDevice> usbVector;
+
+    int fd = open(usbPath, O_RDONLY);
+    if (fd == -1) {
+        perror("smash error: open failed");
+    }
+
+    char buffer[PATH_MAX];
+    int read = syscall(217, fd, buffer, PATH_MAX);
+    int bpos = 0;
+    while (bpos < read) {
+        struct linux_dirent64 *sons = (struct linux_dirent64 *) (buffer + bpos);
+        if (string(sons->d_name) == "." || string(sons->d_name) == "..") {
+            bpos += sons->d_reclen;
+            continue;
+        }
+        std::string devNumPath = std::string(usbPath) + sons->d_name + "/devnum";
+        int devFd = open(devNumPath.c_str(),O_RDONLY);
+        if(devFd == -1){
+            bpos += sons->d_reclen;
+            continue;
+        }
+        std::string vendorPath = std::string(usbPath) + sons->d_name + "/idVendor";
+        std::string productPath = std::string(usbPath) + sons->d_name + "/idProduct";
+        std::string manufacturerPath = std::string(usbPath) + sons->d_name + "/manufacturer";
+        std::string productNamePath = std::string(usbPath) + sons->d_name + "/product";
+        std::string powerPath = std::string(usbPath) + sons->d_name + "/power";
+
+        int devnum = std::stoi(usbInfo(devNumPath)) ;
+        string vendor = usbInfo(vendorPath);
+        string product = usbInfo(productPath);
+        string manufacturer = usbInfo(manufacturerPath);
+        string productName = usbInfo(productNamePath);
+        string power = usbInfo(powerPath);
+
+        usbVector.emplace_back(devnum,vendor,product,manufacturer,productName,power);
+        bpos += sons->d_reclen;
+    }
+    std::sort(usbVector.begin(), usbVector.end(), [](const UsbDevice& a, const UsbDevice& b) {
+        return a.devnum < b.devnum;
+    });
+    close(fd);
+    for(const auto & d : usbVector){
+        cout <<"Device "<<d.devnum<<": ID "<<d.vendor<<":"<<d.product<<" "<<d.manufacture<<" "<<d.product_name<<" MaxPower: "<<d.power<<"mA"<<endl;
+    }
+
+
+
+}
 
 
 
@@ -674,6 +849,27 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
         return nullptr;
     }
     original_cmd_line = cmd_line;
+    std::string IO_cmd_s = string(cmd_line);
+    // it can be implemented better, thats fine :)
+    size_t pos = IO_cmd_s.find(">>");
+    if(pos != std::string::npos ){
+        cmd_line = (IO_cmd_s.substr(0,pos)).c_str();
+        file_out = IO_cmd_s.substr(pos + 2 );
+        file_out = _trim(file_out);
+        is_IO_cmd = ">>";
+    }else {
+        pos = IO_cmd_s.find(">");
+        if(pos != std::string::npos ){
+            cmd_line = (IO_cmd_s.substr(0,pos)).c_str();
+            file_out = IO_cmd_s.substr(pos + 1);
+            file_out = _trim(file_out);
+            is_IO_cmd = ">";
+        }else{
+            is_IO_cmd = "";
+        }
+    }
+
+
 
     string cmd_s = _trim(string(cmd_line));
 
@@ -786,6 +982,42 @@ void SmallShell::executeCommand(const char *cmd_line) {
          setCurrPid(getpid());
          cmd->execute();
          setCurrPid(0);
+        int std_out_new = -1,fd;
+         if(!is_IO_cmd.empty()){
+
+             if(is_IO_cmd == ">") {
+                  fd = open(file_out.c_str(), O_WRONLY | O_CREAT|O_TRUNC, 0666);
+             }else{
+                 fd = open(file_out.c_str(), O_WRONLY|O_APPEND | O_CREAT, 0666);
+             }
+             if (fd == -1) {
+                 perror(" smash error: open failed");
+                 return;
+             }
+             std_out_new = dup(1);
+             if(std_out_new == -1){
+                 perror(" smash error: dup failed");
+                 return;
+             }
+                 if(dup2(fd,1) == -1){
+                     perror("smash error: dup2 failed");
+                     return;
+                 }
+             }
+
+
+         cmd->execute();
+         if(std_out_new != -1){
+             if(dup2(std_out_new,1) == -1){
+                 perror("smash error: dup2 failed");
+                 close(std_out_new);
+                 close(fd);
+                 return;
+             }
+             // need to check if they fail
+             close(std_out_new);
+             close(fd);
+         }
          delete cmd;
          return;
      }else {

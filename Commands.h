@@ -16,15 +16,7 @@ class Command {
     // TODO: Add your data members
 
 public:
-    Command(const char *cmd_line) {
-        if(!cmd_line){
-            this->cmd_line = nullptr;
-            return;
-        }
-        this->cmd_line = new char[strlen(cmd_line) + 1];
-        strcpy(this->cmd_line,cmd_line);
-
-    };
+    Command(const char *cmd_line) ;
     // the args array its final elem should always be nullptr
 
     char  *args[COMMAND_MAX_ARGS + 1] = {};
@@ -102,7 +94,7 @@ public:
 
     virtual ~DiskUsageCommand() {
     }
-
+    int calcDiskUsage(const char* path);
     void execute() override;
 };
 

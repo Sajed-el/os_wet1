@@ -219,7 +219,8 @@ public:
 };
 
 class KillCommand : public BuiltInCommand {
-    // TODO: Add your data members
+private:
+    JobsList *jobs;
 public:
     KillCommand(const char *cmd_line, JobsList *jobs);
 
@@ -230,7 +231,8 @@ public:
 };
 
 class ForegroundCommand : public BuiltInCommand {
-    // TODO: Add your data members
+private:
+    JobsList *jobs;
 public:
     ForegroundCommand(const char *cmd_line, JobsList *jobs);
 
@@ -287,7 +289,7 @@ class SmallShell {
 private:
     // TODO: Add your data members
     SmallShell();
-
+    pid_t currPid = 0;
 public:
     static std::string Prompt ;
     Command *CreateCommand(const char *cmd_line);
@@ -307,6 +309,8 @@ public:
     ~SmallShell();
 
     void executeCommand(const char *cmd_line);
+    void setCurrPid(pid_t pid);
+    pid_t getCurrPid();
 
     // TODO: add extra methods as needed
 };

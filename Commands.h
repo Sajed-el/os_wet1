@@ -120,7 +120,9 @@ public:
 };
 
 class ChangeDirCommand : public BuiltInCommand {
-    // TODO: Add your data members public:
+private:
+    char** prev_dir;
+public:
     ChangeDirCommand(const char *cmd_line, char **plastPwd);
 
     virtual ~ChangeDirCommand() {
@@ -171,9 +173,16 @@ public:
         Command *cmd;
         int jobId;
         pid_t jobPid;
+        bool stopped;
 
-        JobEntry(Command *cmd,int jobId,pid_t jobPid):cmd(cmd),jobId(jobId),
-        jobPid(jobPid){}
+        JobEntry(Command *cmd,int jobId,pid_t jobPid, bool stopped = false)
+            :cmd(cmd),jobId(jobId),jobPid(jobPid),stopped(false){};
+		pid_t getJobPid(){
+			return jobPid;
+		}
+        Command *getCmdLine(){
+          return cmd;
+        }
 
         ~JobEntry() = default;
 
@@ -290,6 +299,7 @@ private:
     // TODO: Add your data members
     SmallShell();
     pid_t currPid = 0;
+    char *plastPwd = nullptr;
 public:
     static std::string Prompt ;
     Command *CreateCommand(const char *cmd_line);
